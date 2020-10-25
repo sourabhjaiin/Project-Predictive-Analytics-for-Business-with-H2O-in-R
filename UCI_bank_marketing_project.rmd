@@ -1,0 +1,89 @@
+---
+title: "UCI_Bank_marketing_project.rmd"
+author: "sourabh jain"
+date: "18/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Loading Libraries
+```{r}
+library(tidyverse)
+library(readxl)
+library(h2o)
+```
+
+### Reading the data
+
+```{r}
+path<-"UCI_bank_marketing.xlsx"
+sheets<-excel_sheets(path)
+sheets
+```
+
+### Exploring the data
+```{r}
+#exploring data in each sheet
+sheets%>% map(~ read_excel(path=path,sheet = .))
+set_names(sheets)
+
+#joining the data by ID column
+data_joined<-sheets[4:7] %>% map(~read_excel(path = path,sheet = .))%>% reduce(left_join)
+
+# viewing parameters
+table(data_joined$TERM_DEPOSIT)
+# thus we can see there are majority who didn't enrol in term deposit. This seems to have class imbalance problem
+``` 
+
+### Data preparation and h2o clustering
+
+```{r}
+#h2o clustering
+h2o.init(max_mem_size = "4g")
+
+#data preparation
+data_joined<-data_joined %>% mutate_if(is.character,as.factor)
+
+#converting to h20 frame
+train<-as.h2o(data_joined)
+y<-"TERM_DEPOSIT"
+x<-setdiff(names(train),c(y,"ID"))
+```
+
+### Run h2o autoML
+```{r}
+aml<-h2o.automl(
+  x=x,
+  y=y,
+  training_frame = train,
+  max_runtime_secs=600,
+  balance_classes=TRUE,
+)
+```
+
+### View autoML leaderboard
+```{r}
+lb<-aml@leaderboard
+print(lb,n=nrow(lb))
+
+# Ensemble exploration
+model_ids<-as.data.frame(aml@leaderboard$model_id)[,1]
+se<-h2o.getModel(grep("StackedEnsemble_BestOfFamily",model_ids,value=TRUE)[1])
+metalearner<-h2o.getModel(se@model$metalearner$name)
+h2o.varimp(metalearner)
+h2o.varimp_plot(metalearner)
+```
+
+### Variable importance
+```{r}
+xgb<-h2o.getModel(grep("GBM",model_ids,value = TRUE)[1])
+h2o.varimp(xgb)
+h2o.varimp_plot(xgb)
+```
+Thus we found that duration variable is the most influential one
+
+
+
